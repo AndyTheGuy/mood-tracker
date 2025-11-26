@@ -23,13 +23,21 @@ const MoodTracker = () => {
   const [newMedName, setNewMedName] = useState('');
   const [exportStartDate, setExportStartDate] = useState('');
   const [exportEndDate, setExportEndDate] = useState('');
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [reminderTimes, setReminderTimes] = useState(['09:00', '14:00', '19:00']);
+  const [newReminderTime, setNewReminderTime] = useState('');
 
   useEffect(() => {
     try {
       const savedEntries = localStorage.getItem('moodTrackerEntries');
       const savedMeds = localStorage.getItem('moodTrackerMeds');
+      const savedReminders = localStorage.getItem('moodTrackerReminders');
+      const savedNotifStatus = localStorage.getItem('moodTrackerNotifications');
+      
       if (savedEntries) setEntries(JSON.parse(savedEntries));
       if (savedMeds) setMedications(JSON.parse(savedMeds));
+      if (savedReminders) setReminderTimes(JSON.parse(savedReminders));
+      if (savedNotifStatus) setNotificationsEnabled(JSON.parse(savedNotifStatus));
     } catch (error) {
       console.error('Error loading data:', error);
     }
@@ -68,6 +76,66 @@ const MoodTracker = () => {
   const removeMedication = (id) => {
     setMedications(medications.filter(m => m.id !== id));
     showSaveMessage('Medication removed');
+  };
+
+  const enableNotifications = async () => {
+    try {
+      if (window.OneSignalDeferred) {
+        window.OneSignalDeferred.push(async function(OneSignal) {
+          await OneSignal.Notifications.requestPermission();
+          const isSubscribed = await OneSignal.User.PushSubscription.optedIn;
+          
+          if (isSubscribed) {
+            setNotificationsEnabled(true);
+            localStorage.setItem('moodTrackerNotifications', JSON.stringify(true));
+            scheduleNotifications();
+            showSaveMessage('Notifications enabled!');
+          } else {
+            showSaveMessage('Permission denied');
+          }
+        });
+      } else {
+        showSaveMessage('OneSignal not loaded');
+      }
+    } catch (error) {
+      console.error('Notification error:', error);
+      showSaveMessage('Error enabling notifications');
+    }
+  };
+
+  const disableNotifications = () => {
+    setNotificationsEnabled(false);
+    localStorage.setItem('moodTrackerNotifications', JSON.stringify(false));
+    showSaveMessage('Notifications disabled');
+  };
+
+  const scheduleNotifications = () => {
+    // OneSignal will handle scheduling on their servers
+    // We just need to send the reminder times to tag the user
+    if (window.OneSignalDeferred) {
+      window.OneSignalDeferred.push(function(OneSignal) {
+        OneSignal.User.addTag("reminder_times", reminderTimes.join(','));
+      });
+    }
+  };
+
+  const addReminderTime = () => {
+    if (newReminderTime && !reminderTimes.includes(newReminderTime)) {
+      const updated = [...reminderTimes, newReminderTime].sort();
+      setReminderTimes(updated);
+      localStorage.setItem('moodTrackerReminders', JSON.stringify(updated));
+      setNewReminderTime('');
+      if (notificationsEnabled) scheduleNotifications();
+      showSaveMessage('Reminder added');
+    }
+  };
+
+  const removeReminderTime = (time) => {
+    const updated = reminderTimes.filter(t => t !== time);
+    setReminderTimes(updated);
+    localStorage.setItem('moodTrackerReminders', JSON.stringify(updated));
+    if (notificationsEnabled) scheduleNotifications();
+    showSaveMessage('Reminder removed');
   };
 
   const toggleMedSelection = (medId) => {
@@ -377,38 +445,98 @@ const MoodTracker = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-lg max-w-md w-full max-h-[80vh] overflow-y-auto">
             <div className="p-4 border-b flex justify-between items-center">
-              <h2 className="text-xl font-bold">Medication Settings</h2>
+              <h2 className="text-xl font-bold">Settings</h2>
               <button onClick={() => setShowMedSettings(false)} className="p-1 hover:bg-gray-100 rounded">
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-4 space-y-4">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newMedName}
-                  onChange={(e) => setNewMedName(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && addMedication()}
-                  placeholder="Add medication"
-                  className="flex-1 px-3 py-2 border rounded-lg"
-                />
-                <button onClick={addMedication} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
-                  Add
-                </button>
-              </div>
-              <div className="space-y-2">
-                {medications.length === 0 ? (
-                  <p className="text-gray-500 text-center py-4">No medications added yet</p>
+            <div className="p-4 space-y-6">
+              {/* Notifications Section */}
+              <div className="border-b pb-4">
+                <h3 className="font-semibold mb-3">Push Notifications</h3>
+                {!notificationsEnabled ? (
+                  <button
+                    onClick={enableNotifications}
+                    className="w-full bg-indigo-600 text-white px-4 py-3 rounded-lg hover:bg-indigo-700"
+                  >
+                    Enable Notifications
+                  </button>
                 ) : (
-                  medications.map(med => (
-                    <div key={med.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                      <span>{med.name}</span>
-                      <button onClick={() => removeMedication(med.id)} className="text-red-600 hover:text-red-800">
-                        <X className="w-4 h-4" />
+                  <>
+                    <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-3 flex items-center justify-between">
+                      <span className="text-green-700">✓ Notifications Enabled</span>
+                      <button
+                        onClick={disableNotifications}
+                        className="text-red-600 text-sm hover:underline"
+                      >
+                        Disable
                       </button>
                     </div>
-                  ))
+                    
+                    <div className="space-y-3">
+                      <label className="block text-sm font-medium">Reminder Times</label>
+                      <div className="flex gap-2">
+                        <input
+                          type="time"
+                          value={newReminderTime}
+                          onChange={(e) => setNewReminderTime(e.target.value)}
+                          className="flex-1 px-3 py-2 border rounded-lg"
+                        />
+                        <button
+                          onClick={addReminderTime}
+                          className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700"
+                        >
+                          Add
+                        </button>
+                      </div>
+                      <div className="space-y-2">
+                        {reminderTimes.map(time => (
+                          <div key={time} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                            <span>{time}</span>
+                            <button
+                              onClick={() => removeReminderTime(time)}
+                              className="text-red-600 hover:text-red-800"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
                 )}
+              </div>
+
+              {/* Medications Section */}
+              <div>
+                <h3 className="font-semibold mb-3">Medications</h3>
+                <div className="flex gap-2 mb-3">
+                  <input
+                    type="text"
+                    value={newMedName}
+                    onChange={(e) => setNewMedName(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && addMedication()}
+                    placeholder="Add medication"
+                    className="flex-1 px-3 py-2 border rounded-lg"
+                  />
+                  <button onClick={addMedication} className="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700">
+                    Add
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {medications.length === 0 ? (
+                    <p className="text-gray-500 text-center py-4">No medications added yet</p>
+                  ) : (
+                    medications.map(med => (
+                      <div key={med.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+                        <span>{med.name}</span>
+                        <button onClick={() => removeMedication(med.id)} className="text-red-600 hover:text-red-800">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </div>
